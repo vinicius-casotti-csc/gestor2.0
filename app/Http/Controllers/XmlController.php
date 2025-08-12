@@ -166,6 +166,7 @@ class XmlController extends Controller
 
             return response()->json([
                 'codccusto' => $codccusto,
+                'xml' => $realXml
             ]);
 
         } catch (\Exception $e) {
