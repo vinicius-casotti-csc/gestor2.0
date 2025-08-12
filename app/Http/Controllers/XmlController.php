@@ -112,7 +112,7 @@ class XmlController extends Controller
         ->header('Content-Type', 'application/xml');
     } 
 
-    public function xmlrequest()
+    public function xmlrequest($idmov)
     {
         $xml = <<<XML
     <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tot="http://www.totvs.com/">
@@ -120,8 +120,8 @@ class XmlController extends Controller
     <soapenv:Body>
         <tot:ReadRecord>
             <tot:DataServerName>MovMovimentoTBCData</tot:DataServerName>
-            <tot:PrimaryKey>2;2009357</tot:PrimaryKey>
-            <tot:Contexto>codcoligada=2;codusuario=vinicius.casotti;codsistema=O</tot:Contexto>
+            <tot:PrimaryKey>2;$idmov</tot:PrimaryKey>
+            <tot:Contexto>codcoligada=2;codusuario=Bionexo;codsistema=O</tot:Contexto>
         </tot:ReadRecord>
     </soapenv:Body>
     </soapenv:Envelope>
@@ -137,12 +137,12 @@ class XmlController extends Controller
                 ],
                 'body' => $xml,
                 'verify' => false,
-                'auth' => ['vinicius.casotti', 'Dregon123']
+                'auth' => ['Bionexo', 'Bionexo@2025']
             ]);
 
             $body = $response->getBody()->getContents();
 
-            // Carrega o XML SOAP
+            // Carrega o XML SOAPhttps://alvorecerassociacao185174.rm.cloudtotvs.com.br:8051/wsFormulaVisual/IwsFormulaVisual
             $soap = simplexml_load_string($body);
 
             // Define namespaces e pega só o ReadRecordResult
@@ -166,7 +166,6 @@ class XmlController extends Controller
 
             return response()->json([
                 'codccusto' => $codccusto,
-                'xml' => $realXml
             ]);
 
         } catch (\Exception $e) {
