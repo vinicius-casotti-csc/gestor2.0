@@ -3,129 +3,147 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\LogsEntrada;
 use Illuminate\Http\Request;
 
 class XmlController extends Controller
 {
    public function transformarXml(Request $request)
-{
-    // Lê o XML enviado no corpo da requisição
-    $xmlString = $request->getContent();
-    $oc = simplexml_load_string($xmlString);
+   {
+        // Lê o XML enviado no corpo da requisição
+        $xmlString = $request->getContent();
+        $oc = simplexml_load_string($xmlString);
 
-    $ordem = $oc->Ordem_Compra;
+        $ordem = $oc->Ordem_Compra;
 
-    // Converte data/hora do XML para formato YYYY-MM-DD
-    $dataEmissao = null;
-    if (!empty((string) $ordem->Dt_Gravacao)) {
-        $dataEmissao = \Carbon\Carbon::createFromFormat('d/m/Y H:i:s', trim((string) $ordem->Dt_Gravacao))
-                                     ->format('Y-m-d');
-    } else {
-        $dataEmissao = now()->format('Y-m-d');
-    }
+        // Converte data/hora do XML para formato YYYY-MM-DD
+        $dataEmissao = null;
+        if (!empty((string) $ordem->Dt_Gravacao)) {
+            $dataEmissao = \Carbon\Carbon::createFromFormat('d/m/Y H:i:s', trim((string) $ordem->Dt_Gravacao))
+                                        ->format('Y-m-d');
+        } else {
+            $dataEmissao = now()->format('Y-m-d');
+        }
 
-    // Calcula valor total de todos os produtos
-    $valorTotal = 0;
-    foreach ($ordem->Produtos_Ordem_Compra->Produto_Ordem_Compra as $prod) {
-        $preco = (float) str_replace(',', '.', $prod->Vl_Preco_Produto);
-        $qtd   = (float) $prod->Qt_Produto;
-        $valorTotal += $preco * $qtd;
-    }
+        // Calcula valor total de todos os produtos
+        $valorTotal = 0;
+        foreach ($ordem->Produtos_Ordem_Compra->Produto_Ordem_Compra as $prod) {
+            $preco = (float) str_replace(',', '.', $prod->Vl_Preco_Produto);
+            $qtd   = (float) $prod->Qt_Produto;
+            $valorTotal += $preco * $qtd;
+        }
 
-    // Criando XML final
-    $novoXml = new \SimpleXMLElement('<root/>');
+        //Consulta Centro de Custo RM
+        $codRequisicao = (string)$ordem->Cd_Requisicao;
+        $codccusto = $this->xmlrequest($codRequisicao);
 
-    // TMOV
-    $tmov = $novoXml->addChild('TMOV');
-    $tmov->addChild('CODCOLIGADA', '2');
-    $tmov->addChild('IDMOV', '-1');
-    $tmov->addChild('CODFILIAL', '1');
-    $tmov->addChild('CODLOC', '21');
-    $tmov->addChild('CODCFO', substr((string) $ordem->Cd_Fornecedor, -6)); // Exemplo de CFO
-    $tmov->addChild('NUMEROMOV', '0');
-    $tmov->addChild('SERIE', 'OC');
-    $tmov->addChild('CODTMV', '1.1.04');
-    $tmov->addChild('TIPO', 'A');
-    $tmov->addChild('STATUS', 'A');
-    $tmov->addChild('DATAEMISSAO', $dataEmissao);
-    $tmov->addChild('CODCPG', '001');
-    $tmov->addChild('VALORBRUTO', number_format($valorTotal, 4, '.', ''));
-    $tmov->addChild('VALORLIQUIDO', number_format($valorTotal, 4, '.', ''));
-    $tmov->addChild('VALORDESC', '0.0000');
-    $tmov->addChild('VALORDESP', '0.0000');
-    $tmov->addChild('DATAMOVIMENTO', $dataEmissao);
-    $tmov->addChild('CODCOLCFO', '0');
-    $tmov->addChild('IDMOVCFO', '-1');
-    $tmov->addChild('VALORMERCADORIAS', '0.0000');
-    $tmov->addChild('CODCCUSTO', '11.0015');
+        $statusCode = $codccusto->getStatusCode();
 
-    // TMOVRATCCU
-    $tmovratccu = $novoXml->addChild('TMOVRATCCU');
-    $tmovratccu->addChild('CODCOLIGADA', '2');
-    $tmovratccu->addChild('IDMOV', '-1');
-    $tmovratccu->addChild('CODCCUSTO', '11.0015');
-    $tmovratccu->addChild('VALOR', number_format($valorTotal, 4, '.', ''));
-    $tmovratccu->addChild('IDMOVRATCCU', '-1');
+        if($statusCode == 500){
 
-    // Contador para sequências
-    $seq = 1;
+            $msg = 'Não Integrado, Centro de custo não localizado!';
 
-    // Loop para cada produto
-    foreach ($ordem->Produtos_Ordem_Compra->Produto_Ordem_Compra as $prod) {
-        $preco = (float) str_replace(',', '.', $prod->Vl_Preco_Produto);
-        $qtd   = (float) $prod->Qt_Produto;
-        $valorBruto = $preco * $qtd;
+            $save = $this->saveLogs($ordem, $msg);
+            return response()->json(['Erro' => $msg], 500); 
 
-        // TITMMOV
-        $titmmov = $novoXml->addChild('TITMMOV');
-        $titmmov->addChild('CODCOLIGADA', '2');
-        $titmmov->addChild('IDMOV', '-1');
-        $titmmov->addChild('NSEQITMMOV', $seq);
-        $titmmov->addChild('CODFILIAL', '1');
-        $titmmov->addChild('NUMEROSEQUENCIAL', $seq);
-        $titmmov->addChild('IDPRD', (string) $prod->Cd_Produto);
-        $titmmov->addChild('QUANTIDADE', number_format($qtd, 4, '.', ''));
-        $titmmov->addChild('PRECOUNITARIO', number_format($preco, 4, '.', ''));
-        $titmmov->addChild('VALORDESP', '0.0000');
-        $titmmov->addChild('VALORDESC', '0.0000');
-        $titmmov->addChild('CODUND', (string) $prod->Ds_Unidade_Compra);
-        $titmmov->addChild('VALORBRUTOITEM', number_format($valorBruto, 4, '.', ''));
-        $titmmov->addChild('VALORTOTALITEM', number_format($valorBruto, 4, '.', ''));
-        $titmmov->addChild('VALORLIQUIDO', number_format($valorBruto, 4, '.', ''));
-        $titmmov->addChild('QUANTIDADETOTAL', number_format($qtd, 4, '.', ''));
-        $titmmov->addChild('INTEGRAAPLICACAO', 'T');
-        $titmmov->addChild('CODCCUSTO', '11.0015');
+        }
 
-        // TITMMOVRATCCU
-        $titmmovratccu = $novoXml->addChild('TITMMOVRATCCU');
-        $titmmovratccu->addChild('CODCOLIGADA', '2');
-        $titmmovratccu->addChild('IDMOV', '-1');
-        $titmmovratccu->addChild('CODCCUSTO', '11.0015');
-        $titmmovratccu->addChild('VALOR', number_format($valorBruto, 4, '.', ''));
-        $titmmovratccu->addChild('IDMOVRATCCU', '-1');
+        // Criando XML final
+        $novoXml = new \SimpleXMLElement('<root/>');
 
-        $seq++;
-    }
+        // TMOV
+        $tmov = $novoXml->addChild('TMOV');
+        $tmov->addChild('CODCOLIGADA', '2');
+        $tmov->addChild('IDMOV', '-1');
+        $tmov->addChild('CODFILIAL', '1');
+        $tmov->addChild('CODLOC', '21');
+        $tmov->addChild('CODCFO', substr((string) $ordem->Cd_Fornecedor, -6)); // Exemplo de CFO
+        $tmov->addChild('NUMEROMOV', '0');
+        $tmov->addChild('SERIE', 'OC');
+        $tmov->addChild('CODTMV', '1.1.04');
+        $tmov->addChild('TIPO', 'A');
+        $tmov->addChild('STATUS', 'A');
+        $tmov->addChild('DATAEMISSAO', $dataEmissao);
+        $tmov->addChild('CODCPG', '001');
+        $tmov->addChild('VALORBRUTO', number_format($valorTotal, 4, '.', ''));
+        $tmov->addChild('VALORLIQUIDO', number_format($valorTotal, 4, '.', ''));
+        $tmov->addChild('VALORDESC', '0.0000');
+        $tmov->addChild('VALORDESP', '0.0000');
+        $tmov->addChild('DATAMOVIMENTO', $dataEmissao);
+        $tmov->addChild('CODCOLCFO', '0');
+        $tmov->addChild('IDMOVCFO', '-1');
+        $tmov->addChild('VALORMERCADORIAS', '0.0000');
+        $tmov->addChild('CODCCUSTO', '11.0015');
 
-    // Retorna o XML final
-    return response($novoXml->asXML(), 200)
-        ->header('Content-Type', 'application/xml');
+        // TMOVRATCCU
+        $tmovratccu = $novoXml->addChild('TMOVRATCCU');
+        $tmovratccu->addChild('CODCOLIGADA', '2');
+        $tmovratccu->addChild('IDMOV', '-1');
+        $tmovratccu->addChild('CODCCUSTO', '11.0015');
+        $tmovratccu->addChild('VALOR', number_format($valorTotal, 4, '.', ''));
+        $tmovratccu->addChild('IDMOVRATCCU', '-1');
+
+        // Contador para sequências
+        $seq = 1;
+
+        // Loop para cada produto
+        foreach ($ordem->Produtos_Ordem_Compra->Produto_Ordem_Compra as $prod) {
+            $preco = (float) str_replace(',', '.', $prod->Vl_Preco_Produto);
+            $qtd   = (float) $prod->Qt_Produto;
+            $valorBruto = $preco * $qtd;
+
+            // TITMMOV
+            $titmmov = $novoXml->addChild('TITMMOV');
+            $titmmov->addChild('CODCOLIGADA', '2');
+            $titmmov->addChild('IDMOV', '-1');
+            $titmmov->addChild('NSEQITMMOV', $seq);
+            $titmmov->addChild('CODFILIAL', '1');
+            $titmmov->addChild('NUMEROSEQUENCIAL', $seq);
+            $titmmov->addChild('IDPRD', (string) $prod->Cd_Produto);
+            $titmmov->addChild('QUANTIDADE', number_format($qtd, 4, '.', ''));
+            $titmmov->addChild('PRECOUNITARIO', number_format($preco, 4, '.', ''));
+            $titmmov->addChild('VALORDESP', '0.0000');
+            $titmmov->addChild('VALORDESC', '0.0000');
+            $titmmov->addChild('CODUND', (string) $prod->Ds_Unidade_Compra);
+            $titmmov->addChild('VALORBRUTOITEM', number_format($valorBruto, 4, '.', ''));
+            $titmmov->addChild('VALORTOTALITEM', number_format($valorBruto, 4, '.', ''));
+            $titmmov->addChild('VALORLIQUIDO', number_format($valorBruto, 4, '.', ''));
+            $titmmov->addChild('QUANTIDADETOTAL', number_format($qtd, 4, '.', ''));
+            $titmmov->addChild('INTEGRAAPLICACAO', 'T');
+            $titmmov->addChild('CODCCUSTO', '11.0015');
+
+            // TITMMOVRATCCU
+            $titmmovratccu = $novoXml->addChild('TITMMOVRATCCU');
+            $titmmovratccu->addChild('CODCOLIGADA', '2');
+            $titmmovratccu->addChild('IDMOV', '-1');
+            $titmmovratccu->addChild('CODCCUSTO', '11.0015');
+            $titmmovratccu->addChild('VALOR', number_format($valorBruto, 4, '.', ''));
+            $titmmovratccu->addChild('IDMOVRATCCU', '-1');
+
+            $seq++;
+        }
+
+        // Retorna o XML final
+        return response($novoXml->asXML(), 200)
+            ->header('Content-Type', 'application/xml');
+
     } 
 
-    public function xmlrequest($idmov)
+    public function xmlrequest($codRequisicao)
     {
+
         $xml = <<<XML
-    <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tot="http://www.totvs.com/">
-    <soapenv:Header/>
-    <soapenv:Body>
-        <tot:ReadRecord>
-            <tot:DataServerName>MovMovimentoTBCData</tot:DataServerName>
-            <tot:PrimaryKey>2;$idmov</tot:PrimaryKey>
-            <tot:Contexto>codcoligada=2;codusuario=Bionexo;codsistema=O</tot:Contexto>
-        </tot:ReadRecord>
-    </soapenv:Body>
-    </soapenv:Envelope>
-    XML;
+            <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tot="http://www.totvs.com/">
+            <soapenv:Header/>
+            <soapenv:Body>
+                <tot:ReadRecord>
+                    <tot:DataServerName>MovMovimentoTBCData</tot:DataServerName>
+                    <tot:PrimaryKey>$codRequisicao</tot:PrimaryKey>
+                    <tot:Contexto>codcoligada=2;codusuario=Bionexo;codsistema=O</tot:Contexto>
+                </tot:ReadRecord>
+            </soapenv:Body>
+            </soapenv:Envelope>
+        XML;
 
         $client = new \GuzzleHttp\Client();
 
@@ -174,6 +192,21 @@ class XmlController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    public function saveLogs($dados, $motivo)
+    {
+        $insert = LogsEntrada::create([
+                    'id_requisicao' => $dados->Cd_Requisicao,
+                    'json'          => json_encode($dados, JSON_UNESCAPED_UNICODE),
+                    'data'          => now(),
+                    'motivo'        => $motivo,
+                    'status'        => 2,
+                ]);
+
+
+        return $insert;
+
     }
 
 }
